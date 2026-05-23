@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>San Francisco — June 2, 2026 Primary | US House CD-11</title>
+<meta name="description" content="Precinct-level preliminary results for the US House District 11 primary, June 2, 2026.">
+<!-- Pre-election: unindexed. Drop this meta and the robots.txt block on June 1. -->
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="test-switcher" style="background:#191a4d;color:#fff;padding:8px 14px;font:600 13px/1.4 system-ui,sans-serif;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+  <span style="opacity:.8">TEST HARNESS — CD-11 March 2024 primary (8 candidates, top-3 shown). Simulated drop:</span>
+  <button data-snap="./data/drop1.json" class="snap active">Drop 1 (~8:45pm, VBM)</button>
+  <button data-snap="./data/drop2.json" class="snap">Drop 2 (~11pm, +ED)</button>
+  <button data-snap="./data/final.json" class="snap">Final (certified, precincts)</button>
+</div>
+<header class="topbar">
+  <h1>San Francisco &mdash; March 5, 2024 Primary <span style="font-size:.6em;opacity:.7">[TEST]</span></h1>
+  <h2>US House CD-11</h2>
+  <div class="banner" id="status-banner">PRELIMINARY &mdash; RESULTS WILL CHANGE AS BALLOTS ARE COUNTED</div>
+  <div class="meta">
+    <span id="last-update">Last update: —</span>
+    <span id="ballots-counted">Ballots counted: —</span>
+  </div>
+</header>
+
+<section class="citywide-strip" id="citywide-strip">
+  <div class="placeholder">Citywide preliminary totals appear here at Report 1 (~8:45pm).</div>
+</section>
+
+<section class="map-region">
+  <div class="map-toggle" role="tablist">
+    <button data-granularity="precinct" class="active" role="tab" aria-selected="true">Precinct view</button>
+    <button data-granularity="sup" role="tab" aria-selected="false">Supervisor district view</button>
+    <button data-granularity="cd11" role="tab" aria-selected="false">All CD-11</button>
+  </div>
+  <div id="results-map" class="map-canvas"></div>
+  <aside id="candidate-detail" class="side-panel hidden">
+    <button class="close-btn" id="close-detail" aria-label="Close">&times;</button>
+    <h3 id="detail-title">Precinct</h3>
+    <div id="detail-body"></div>
+  </aside>
+</section>
+
+<footer>
+  <p>Source: San Francisco Department of Elections. <a href="https://sfelections.org/results/20260602w/" target="_blank" rel="noopener">Official results page</a>.</p>
+  <p class="muted">Data updated automatically from machine-readable SF DoE releases. Preliminary until certified by the Department of Elections.</p>
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="js/map.js"></script>
+<script>
+  // TEST HARNESS switcher wiring (not part of the production dashboard).
+  document.querySelectorAll("#test-switcher .snap").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#test-switcher .snap").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      window.__loadSnapshot(btn.dataset.snap);
+    });
+  });
+</script>
+</body>
+</html>

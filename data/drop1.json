@@ -1,0 +1,53 @@
+{
+  "timestamp": "2024-03-05T20:45:00+00:00",
+  "contest": "UNITED STATES REPRESENTATIVE, DISTRICT 11",
+  "contest_id": null,
+  "certified": false,
+  "candidates": [
+    {
+      "name": "NANCY PELOSI",
+      "votes": 82611,
+      "share": 0.739347563431333
+    },
+    {
+      "name": "BRUCE LOU",
+      "votes": 9162,
+      "share": 0.0819975835682642
+    },
+    {
+      "name": "MARJORIE MIKELS",
+      "votes": 5593,
+      "share": 0.050055935919810265
+    },
+    {
+      "name": "BIANCA VON KRIEG",
+      "votes": 4561,
+      "share": 0.04081979684073925
+    },
+    {
+      "name": "JASON ZENG",
+      "votes": 3717,
+      "share": 0.033266210229561013
+    },
+    {
+      "name": "JASON BOYCE",
+      "votes": 2584,
+      "share": 0.02312614668635611
+    },
+    {
+      "name": "LARRY NICHELSON",
+      "votes": 1959,
+      "share": 0.017532554705329575
+    },
+    {
+      "name": "EVE DEL CASTELLO",
+      "votes": 1548,
+      "share": 0.013854208618606525
+    }
+  ],
+  "progress": {
+    "counted": 111735,
+    "estimate": 470000
+  },
+  "precincts": []
+}
