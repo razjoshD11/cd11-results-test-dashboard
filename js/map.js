@@ -49,6 +49,8 @@
   let legendControl = null;
   let displayConfig = { mode: "all" };
   let precinctToSD = new Map();  // precinct id -> supervisor_district (from precinct GeoJSON)
+  let nbhdLabels = null;         // [{name, lat, lon}]
+  let labelLayer = null;         // always-on neighborhood name labels
 
   function initMap() {
     leafletMap = L.map(els.map, { zoomControl: true, scrollWheelZoom: true }).setView([37.7649, -122.4394], 12);
@@ -82,6 +84,10 @@
         precinctToSD = new Map(
           (geo.precinct.features || []).map((f) => [f.properties?.precinct, f.properties?.supervisor_district])
         );
+      }
+      if (!nbhdLabels) {
+        const lRes = await fetch("./data/neighborhood_labels.json", { cache: "no-store" });
+        if (lRes.ok) { nbhdLabels = await lRes.json(); buildLabels(); }
       }
       buildLayers();
 
@@ -192,6 +198,21 @@
       });
     }
     showActiveLayer();
+  }
+
+  // Always-on neighborhood name labels (independent of the toggle layer).
+  function buildLabels() {
+    if (!leafletMap || !nbhdLabels || labelLayer) return;
+    labelLayer = L.layerGroup();
+    for (const lab of nbhdLabels) {
+      const icon = L.divIcon({
+        className: "nbhd-label",
+        html: escapeHtml(lab.name),
+        iconSize: [0, 0],   // let the text size itself; anchor at the point
+      });
+      L.marker([lab.lat, lab.lon], { icon, interactive: false, keyboard: false }).addTo(labelLayer);
+    }
+    labelLayer.addTo(leafletMap);
   }
 
   function showActiveLayer() {
@@ -346,7 +367,10 @@
       return;
     }
     const total = data.total_votes || 1;
-    els.detailBody.innerHTML = `${panelHeader(total)}${candidateRows(data.candidates, total)}${panelFooter()}`;
+    const nb = props.neighborhood
+      ? `<p style="font-size:0.8rem;color:var(--color-muted);margin:0 0 0.25rem">${escapeHtml(props.neighborhood)}</p>`
+      : "";
+    els.detailBody.innerHTML = `${nb}${panelHeader(total)}${candidateRows(data.candidates, total)}${panelFooter()}`;
     els.detail.classList.remove("hidden");
   }
 
