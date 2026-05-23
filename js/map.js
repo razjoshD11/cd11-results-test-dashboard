@@ -227,16 +227,16 @@
     const props = feature.properties || {};
     const leader = leaderFor(key, props);
     if (key === "precinct") {
-      const base = { weight: 0.7, color: "#888", fillOpacity: 0.7, fillColor: "#e0e0e0" };
-      if (!analysisByPrecinct.get(props.precinct)) { base.fillOpacity = 0.15; return base; }
+      const base = { weight: 1.4, color: "#2a2a2a", fillOpacity: 0.4, fillColor: "#e0e0e0" };
+      if (!analysisByPrecinct.get(props.precinct)) { base.fillOpacity = 0.08; base.weight = 1; return base; }
       base.fillColor = leaderColorMap.get(leader) || "#888";
       return base;
     }
     if (key === "sup") {
-      return { weight: 1.6, color: "#333", fillOpacity: leader ? 0.6 : 0.12, fillColor: leaderColorMap.get(leader) || "#bbb" };
+      return { weight: 3, color: "#1a1a1a", fillOpacity: leader ? 0.32 : 0.08, fillColor: leaderColorMap.get(leader) || "#bbb" };
     }
     // cd11 outline
-    return { weight: 2.2, color: "#222", fillOpacity: leader ? 0.5 : 0.12, fillColor: leaderColorMap.get(leader) || "#bbb" };
+    return { weight: 3.5, color: "#111", fillOpacity: leader ? 0.28 : 0.08, fillColor: leaderColorMap.get(leader) || "#bbb" };
   }
 
   function tooltipFor(key, props) {
