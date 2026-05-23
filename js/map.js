@@ -1,18 +1,26 @@
 // CD-11 public results map.
-// Fetches:
-//   ./data/cd11_precincts.geojson  (CD-11 precinct polygons, mirror of internal repo's reference)
-//   ./data/latest.json             (public-safe analysis slice, populated by internal repo's publish workflow)
-//   ./data/candidates.json         (candidate photos + 1-line bios)
+// Three map layers, one per toggle:
+//   ./data/cd11_precincts.geojson  -> precinct polygons (Precinct view)
+//   ./data/sup_districts.geojson   -> 11 supervisor-district polygons (Supervisor district view)
+//   ./data/cd11_outline.geojson    -> single CD-11 outline (All CD-11 view)
+// Toggling swaps the geometry layer, so precinct lines are replaced by the
+// coarser boundaries rather than merely recolored.
+// Plus:
+//   ./data/<snapshot>.json         -> public-safe results slice
+//   ./data/candidates.json         -> photos + bios + _display config
 
 (() => {
   const REFRESH_MS = 60 * 1000;
-  const GEOJSON_URL = "./data/cd11_precincts.geojson";
+  const GEOJSON_URLS = {
+    precinct: "./data/cd11_precincts.geojson",
+    sup: "./data/sup_districts.geojson",
+    cd11: "./data/cd11_outline.geojson",
+  };
   // TEST HARNESS: the snapshot file is selectable via the switcher bar.
   // Production uses a fixed "./data/latest.json"; the rest is unchanged.
   let DATA_URL = "./data/drop1.json";
   const CANDIDATES_URL = "./data/candidates.json";
 
-  // Neutral colorblind-safe palette for race-leader coloring (public map shows NO Wiener-favorable colors).
   const PALETTE = ["#4477AA", "#EE6677", "#228833", "#CCBB44", "#66CCEE", "#AA3377", "#BBBBBB"];
 
   const els = {
@@ -29,22 +37,18 @@
   };
 
   let leafletMap = null;
-  let geojsonLayer = null;
-  let geojsonData = null;
+  const geo = { precinct: null, sup: null, cd11: null };     // raw GeoJSON
+  const layers = { precinct: null, sup: null, cd11: null };  // Leaflet layers
+  let activeKey = null;
+  let didFit = false;
   let analysisByPrecinct = new Map();
   let lastData = null;
   let candidates = null;
   let leaderColorMap = new Map();
   let granularity = "precinct";
   let legendControl = null;
-  // Which candidates to surface in breakdowns. Set from candidates.json "_display":
-  //   { "mode": "topN", "n": 3 }                       -> top 3 vote-getters
-  //   { "mode": "featured", "featured": ["NAME", ...] } -> a fixed named slate
-  // Defaults to showing everyone.
   let displayConfig = { mode: "all" };
-  // precinct id -> supervisor_district, derived from the GeoJSON (the public data
-  // slice intentionally strips supervisor_district, so aggregation reads it here).
-  let precinctToSD = new Map();
+  let precinctToSD = new Map();  // precinct id -> supervisor_district (from precinct GeoJSON)
 
   function initMap() {
     leafletMap = L.map(els.map, { zoomControl: true, scrollWheelZoom: true }).setView([37.7649, -122.4394], 12);
@@ -61,7 +65,7 @@
       btn.classList.add("active");
       btn.setAttribute("aria-selected", "true");
       granularity = btn.dataset.granularity;
-      restyleMap();
+      showActiveLayer();
       renderLegend();
     });
   });
@@ -69,26 +73,22 @@
 
   async function tick() {
     try {
-      if (!geojsonData) {
-        const gjRes = await fetch(GEOJSON_URL, { cache: "no-store" });
-        if (gjRes.ok) {
-          geojsonData = await gjRes.json();
-          precinctToSD = new Map(
-            (geojsonData.features || []).map((f) => [f.properties?.precinct, f.properties?.supervisor_district])
-          );
-          renderMap();
-        }
+      for (const key of Object.keys(GEOJSON_URLS)) {
+        if (geo[key]) continue;
+        const res = await fetch(GEOJSON_URLS[key], { cache: "no-store" });
+        if (res.ok) geo[key] = await res.json();
       }
+      if (geo.precinct && precinctToSD.size === 0) {
+        precinctToSD = new Map(
+          (geo.precinct.features || []).map((f) => [f.properties?.precinct, f.properties?.supervisor_district])
+        );
+      }
+      buildLayers();
+
       if (!candidates) {
         const cRes = await fetch(CANDIDATES_URL, { cache: "no-store" });
         if (cRes.ok) {
           const raw = await cRes.json();
-          // Build a case-insensitive lookup with last-name fallback.
-          // SF DoE has emitted "WIENER, SCOTT" in past elections, but if the
-          // June 2 CVR shifts to "Wiener, Scott" or "Scott Wiener", the
-          // exact-match lookup would silently fail and the side panel would
-          // show fallback initials instead of real photos. This builds the
-          // tolerance in.
           candidates = {};
           if (raw._display && typeof raw._display === "object") displayConfig = raw._display;
           for (const [key, value] of Object.entries(raw)) {
@@ -125,7 +125,7 @@
 
     buildLeaderColorMap(data.candidates || []);
     renderCitywide(data.candidates || []);
-    restyleMap();
+    restyleActive();
     updateTooltips();
     renderLegend();
   }
@@ -136,13 +136,11 @@
     sorted.forEach((c, i) => leaderColorMap.set(c.name, PALETTE[i % PALETTE.length]));
   }
 
-  // Tokens of length > 2 from a name, e.g. "WIENER, SCOTT" -> ["WIENER","SCOTT"].
   function nameTokens(name) {
     return new Set(String(name).toUpperCase().split(/[\s,]+/).filter((t) => t.length > 2));
   }
 
-  // Reduce a sorted [name, votes] list to the candidates the dashboard should show,
-  // per displayConfig. Order is preserved for topN/all; featured uses the slate order.
+  // Reduce a sorted [name, votes] list to the candidates the dashboard should show.
   function pickDisplay(sortedEntries) {
     const mode = displayConfig?.mode;
     if (mode === "topN") {
@@ -161,7 +159,7 @@
         });
         if (hit && !out.includes(hit)) out.push(hit);
       }
-      return out.length ? out : sortedEntries; // graceful fallback if none matched
+      return out.length ? out : sortedEntries;
     }
     return sortedEntries;
   }
@@ -179,52 +177,106 @@
       </span>`).join("");
   }
 
-  function renderMap() {
-    if (!leafletMap || !geojsonData) return;
-    if (geojsonLayer) geojsonLayer.remove();
-    geojsonLayer = L.geoJSON(geojsonData, {
-      style: feature => styleForFeature(feature),
-      onEachFeature: (feature, layer) => {
-        const p = feature.properties || {};
-        layer.bindTooltip(p.precinct_full_name || `PCT ${p.precinct}`, { sticky: true });
-        layer.on("click", () => openSidePanel(p));
-      },
-    }).addTo(leafletMap);
-    try { leafletMap.fitBounds(geojsonLayer.getBounds(), { padding: [10, 10] }); } catch (e) { /* empty */ }
+  // ---- layers ---------------------------------------------------------------
+
+  function buildLayers() {
+    if (!leafletMap) return;
+    for (const key of Object.keys(GEOJSON_URLS)) {
+      if (layers[key] || !geo[key]) continue;
+      layers[key] = L.geoJSON(geo[key], {
+        style: (feature) => styleFor(key, feature),
+        onEachFeature: (feature, layer) => {
+          layer.on("click", () => openPanel(key, feature.properties || {}));
+          layer.bindTooltip(tooltipFor(key, feature.properties || {}), { sticky: true });
+        },
+      });
+    }
+    showActiveLayer();
   }
 
-  function restyleMap() {
-    if (!geojsonLayer) return;
-    geojsonLayer.setStyle(feature => styleForFeature(feature));
+  function showActiveLayer() {
+    if (!leafletMap) return;
+    const key = granularity in layers ? granularity : "precinct";
+    if (!layers[key]) return;
+    if (activeKey && activeKey !== key && layers[activeKey]) leafletMap.removeLayer(layers[activeKey]);
+    if (!leafletMap.hasLayer(layers[key])) layers[key].addTo(leafletMap);
+    activeKey = key;
+    restyleActive();
+    updateTooltips();
+    if (!didFit) {
+      try { leafletMap.fitBounds(layers[key].getBounds(), { padding: [10, 10] }); didFit = true; } catch (e) { /* empty */ }
+    }
   }
 
-  function styleForFeature(feature) {
+  function restyleActive() {
+    if (activeKey && layers[activeKey]) layers[activeKey].setStyle((feature) => styleFor(activeKey, feature));
+  }
+
+  // Leader for a given layer feature.
+  function leaderFor(key, props) {
+    if (key === "precinct") return analysisByPrecinct.get(props.precinct)?.leader || null;
+    if (key === "sup") return leaderInSupDistrict(props.supervisor_district);
+    if (key === "cd11") {
+      const sorted = [...(lastData?.candidates || [])].sort((a, b) => (b.votes || 0) - (a.votes || 0));
+      return sorted[0]?.name || null;
+    }
+    return null;
+  }
+
+  function styleFor(key, feature) {
     const props = feature.properties || {};
-    const data = analysisByPrecinct.get(props.precinct);
-    const base = { weight: 0.7, color: "#888", fillOpacity: 0.7, fillColor: "#e0e0e0" };
-    if (!data) {
-      base.fillOpacity = 0.15;
+    const leader = leaderFor(key, props);
+    if (key === "precinct") {
+      const base = { weight: 0.7, color: "#888", fillOpacity: 0.7, fillColor: "#e0e0e0" };
+      if (!analysisByPrecinct.get(props.precinct)) { base.fillOpacity = 0.15; return base; }
+      base.fillColor = leaderColorMap.get(leader) || "#888";
       return base;
     }
-    if (granularity === "precinct" && data.leader) {
-      base.fillColor = leaderColorMap.get(data.leader) || "#888";
-    } else if (granularity === "sup") {
-      // Aggregate by supervisor_district
-      const sd = props.supervisor_district;
-      const leader = leaderInSupDistrict(sd);
-      base.fillColor = leaderColorMap.get(leader) || "#888";
-      base.weight = 0.3;
-    } else if (granularity === "cd11") {
-      const cwLeader = lastData?.candidates?.[0]?.name;
-      base.fillColor = leaderColorMap.get(cwLeader) || "#888";
-      base.weight = 0.3;
+    if (key === "sup") {
+      return { weight: 1.6, color: "#333", fillOpacity: leader ? 0.6 : 0.12, fillColor: leaderColorMap.get(leader) || "#bbb" };
     }
-    return base;
+    // cd11 outline
+    return { weight: 2.2, color: "#222", fillOpacity: leader ? 0.5 : 0.12, fillColor: leaderColorMap.get(leader) || "#bbb" };
   }
 
-  // Aggregate candidate votes across every precinct in a supervisor district.
-  // Reads supervisor_district from the GeoJSON (precinctToSD), since the public
-  // data slice strips it. Returns a {name: votes} tally.
+  function tooltipFor(key, props) {
+    const leader = leaderFor(key, props);
+    let title;
+    if (key === "precinct") title = props.precinct_full_name || `PCT ${props.precinct}`;
+    else if (key === "sup") title = `Supervisor District ${props.supervisor_district}`;
+    else title = "All CD-11";
+    if (!leader) return escapeHtml(title);
+    const pct = leadingPct(key, props, leader);
+    return `<strong>${escapeHtml(title)}</strong><br>${escapeHtml(leader)} ${pct.toFixed(1)}%`;
+  }
+
+  // Leading candidate's share for a feature.
+  function leadingPct(key, props, leader) {
+    if (key === "precinct") {
+      const d = analysisByPrecinct.get(props.precinct);
+      return d && d.total_votes ? ((d.candidates?.[leader] || 0) / d.total_votes) * 100 : 0;
+    }
+    if (key === "sup") {
+      const tally = tallySupDistrict(props.supervisor_district);
+      const total = Object.values(tally).reduce((a, b) => a + b, 0);
+      return total ? ((tally[leader] || 0) / total) * 100 : 0;
+    }
+    const cw = lastData?.candidates || [];
+    const total = cw.reduce((a, c) => a + (c.votes || 0), 0);
+    const me = cw.find((c) => c.name === leader);
+    return total && me ? (me.votes / total) * 100 : 0;
+  }
+
+  function updateTooltips() {
+    if (!activeKey || !layers[activeKey]) return;
+    layers[activeKey].eachLayer((layer) => {
+      const props = layer.feature?.properties || {};
+      layer.setTooltipContent(tooltipFor(activeKey, props));
+    });
+  }
+
+  // ---- supervisor-district aggregation (reads SD from the precinct GeoJSON) --
+
   function tallySupDistrict(sd) {
     const tally = {};
     if (sd == null || !lastData?.precincts) return tally;
@@ -244,7 +296,8 @@
     return best;
   }
 
-  // Render display-limited candidate rows from a {name: votes} tally.
+  // ---- side panels ----------------------------------------------------------
+
   function candidateRows(candObj, total) {
     const sorted = Object.entries(candObj || {}).sort(([, a], [, b]) => b - a);
     return pickDisplay(sorted).map(([name, votes]) => {
@@ -270,30 +323,21 @@
   }
 
   function panelFooter() {
-    const certified = lastData?.certified
-      ? "Certified final."
-      : "Preliminary until certified.";
+    const certified = lastData?.certified ? "Certified final." : "Preliminary until certified.";
     return `<p style="font-size:0.8rem;color:var(--color-muted);margin-top:1rem">Updated ${formatTimestamp(lastData?.timestamp)}. ${certified}</p>`;
   }
 
-  function openSidePanel(props) {
-    // In supervisor-district view, clicking shows the whole district's aggregate.
-    if (granularity === "sup") {
-      const sd = precinctToSD.get(props.precinct);
-      const tally = tallySupDistrict(sd);
-      const total = Object.values(tally).reduce((a, b) => a + b, 0);
-      els.detailTitle.textContent = sd != null ? `Supervisor District ${sd}` : "Supervisor district";
-      if (!total) {
-        els.detailBody.innerHTML = `<p class="placeholder">No data yet for this district.</p>`;
-        els.detail.classList.remove("hidden");
-        return;
-      }
-      const header = `<p style="font-size:0.85rem;color:var(--color-muted);margin:0.5rem 0">Total ballots counted: <strong>${total.toLocaleString()}</strong></p>`;
-      els.detailBody.innerHTML = `${header}${candidateRows(tally, total)}${panelFooter()}`;
-      els.detail.classList.remove("hidden");
-      return;
-    }
+  function panelHeader(total) {
+    return `<p style="font-size:0.85rem;color:var(--color-muted);margin:0.5rem 0">Total ballots counted: <strong>${total.toLocaleString()}</strong></p>`;
+  }
 
+  function openPanel(key, props) {
+    if (key === "sup") return openSupPanel(props.supervisor_district);
+    if (key === "cd11") return openCitywidePanel();
+    return openPrecinctPanel(props);
+  }
+
+  function openPrecinctPanel(props) {
     const data = analysisByPrecinct.get(props.precinct);
     els.detailTitle.textContent = props.precinct_full_name || `PCT ${props.precinct}`;
     if (!data) {
@@ -302,10 +346,38 @@
       return;
     }
     const total = data.total_votes || 1;
-    const header = `<p style="font-size:0.85rem;color:var(--color-muted);margin:0.5rem 0">Total ballots counted: <strong>${total.toLocaleString()}</strong></p>`;
-    els.detailBody.innerHTML = `${header}${candidateRows(data.candidates, total)}${panelFooter()}`;
+    els.detailBody.innerHTML = `${panelHeader(total)}${candidateRows(data.candidates, total)}${panelFooter()}`;
     els.detail.classList.remove("hidden");
   }
+
+  function openSupPanel(sd) {
+    const tally = tallySupDistrict(sd);
+    const total = Object.values(tally).reduce((a, b) => a + b, 0);
+    els.detailTitle.textContent = sd != null ? `Supervisor District ${sd}` : "Supervisor district";
+    if (!total) {
+      els.detailBody.innerHTML = `<p class="placeholder">No data yet for this district.</p>`;
+      els.detail.classList.remove("hidden");
+      return;
+    }
+    els.detailBody.innerHTML = `${panelHeader(total)}${candidateRows(tally, total)}${panelFooter()}`;
+    els.detail.classList.remove("hidden");
+  }
+
+  function openCitywidePanel() {
+    const tally = {};
+    for (const c of lastData?.candidates || []) tally[c.name] = c.votes || 0;
+    const total = Object.values(tally).reduce((a, b) => a + b, 0);
+    els.detailTitle.textContent = "All CD-11 — Citywide";
+    if (!total) {
+      els.detailBody.innerHTML = `<p class="placeholder">No results yet.</p>`;
+      els.detail.classList.remove("hidden");
+      return;
+    }
+    els.detailBody.innerHTML = `${panelHeader(total)}${candidateRows(tally, total)}${panelFooter()}`;
+    els.detail.classList.remove("hidden");
+  }
+
+  // ---- legend ---------------------------------------------------------------
 
   function renderLegend() {
     if (!leafletMap || !leaderColorMap.size) return;
@@ -324,36 +396,18 @@
     legendControl.addTo(leafletMap);
   }
 
-  // Refresh hover tooltips with the leader + leading share once data is loaded.
-  function updateTooltips() {
-    if (!geojsonLayer) return;
-    geojsonLayer.eachLayer((layer) => {
-      const p = layer.feature?.properties || {};
-      const name = p.precinct_full_name || `PCT ${p.precinct}`;
-      const data = analysisByPrecinct.get(p.precinct);
-      if (data && data.leader && data.total_votes) {
-        const pct = ((data.candidates?.[data.leader] || 0) / data.total_votes) * 100;
-        layer.setTooltipContent(`<strong>${escapeHtml(name)}</strong><br>${escapeHtml(data.leader)} ${pct.toFixed(1)}%`);
-      } else {
-        layer.setTooltipContent(escapeHtml(name));
-      }
-    });
-  }
+  // ---- small helpers --------------------------------------------------------
 
   function initials(name) {
-    return name.split(/[\s,]+/).filter(Boolean).slice(0, 2).map(s => s[0]?.toUpperCase() || "").join("");
+    return name.split(/[\s,]+/).filter(Boolean).slice(0, 2).map((s) => s[0]?.toUpperCase() || "").join("");
   }
 
   function lookupCandidate(name) {
-    // Tolerant lookup: try exact-uppercase first, then last-name token.
     if (!candidates || !name) return {};
     const upper = name.toUpperCase().trim();
     if (candidates[upper]) return candidates[upper];
-    // "Scott Wiener" or "WIENER, SCOTT" -> last name "WIENER"
     const tokens = upper.split(/[\s,]+/).filter(Boolean);
-    for (const tok of tokens) {
-      if (candidates[tok]) return candidates[tok];
-    }
+    for (const tok of tokens) if (candidates[tok]) return candidates[tok];
     return {};
   }
 
@@ -366,9 +420,7 @@
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   }
 
-  // TEST HARNESS: snapshot switcher. Swaps the data file and re-renders without
-  // touching geojson/candidates (already cached). Mirrors what the production
-  // 60s tick does when latest.json changes between ballot drops.
+  // TEST HARNESS: snapshot switcher. Swaps the data file and re-renders.
   window.__loadSnapshot = (url) => {
     DATA_URL = url;
     tick();
