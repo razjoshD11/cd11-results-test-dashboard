@@ -1,9 +1,9 @@
 {
   "district": "CD-11 (US House, San Francisco)",
-  "count": 444,
+  "count": 450,
   "updated": "2026-05-25",
-  "rule": "All SF precincts, EXCLUDING CA-15 neighborhoods {Excelsior, Outer Mission, Oceanview/Merced/Ingleside, Portola, Visitacion Valley} and precincts {1139, 7946, 7039, 7041, 7052 (McLaren Park area), 7854 (Outer Mission/SD-8 border), 9903, 9904 (SD-6 special, no voters)}.",
-  "source": "sf_precincts.geojson (514 SF precincts); on election night the real CVR (CON011) is authoritative and this list should be regenerated minus the explicit exclusions.",
+  "source": "AUTHORITATIVE: real SF DoE 2024 certified CVR (CON011 precinct portions, district id 103, '11TH CONG'), from CVR_Export_20241202143051.zip. Same district boundaries as June 2026 (2022-2030 redistricting cycle).",
+  "rule": "CVR CON011 precinct set (451) MINUS explicit campaign exclusions. Of the 8 flagged precincts only 7854 is actually in CON011; the McLaren/Bayview/SD-6 precincts are not in CD-11 per the CVR.",
   "explicit_excluded_precincts": [
     "1139",
     "7946",
@@ -14,7 +14,13 @@
     "9903",
     "9904"
   ],
+  "note": "7854 IS in CD-11 per the authoritative CVR but is excluded per campaign decision (2026-05-25). Remove it from the exclusion list to restore the full 451.",
   "precincts": [
+    "1101",
+    "1102",
+    "1103",
+    "1108",
+    "1116",
     "7001",
     "7002",
     "7003",
@@ -458,6 +464,7 @@
     "9805",
     "9806",
     "9807",
-    "9808"
+    "9808",
+    "9901"
   ]
 }
